@@ -1,12 +1,14 @@
 /*
 The producer process opens the text file:
 
-3@csu.fullerton.edu      6/23/2021 20:54                6/23/2021 20:55
-3@csu.fullerton.edu      6/17/2021 18:34                6/17/2021 18:36
-1@csu.fullerton.edu      6/23/2021 17:53                6/23/2021 20:56
-3@csu.fullerton.edu      6/14/2021 18:48                6/14/2021 19:50
-4@csu.fullerton.edu      6/21/2021 17:56                6/21/2021 20:39
-3@csu.fullerton.edu      6/21/2021 19:44                6/21/2021 19:50
+Sample file data for Zoomreport.txt:
+3@csu.fullerton.edu 6/23/2021 20:54 6/23/2021 20:55
+3@csu.fullerton.edu 6/17/2021 18:34 6/17/2021 18:36
+1@csu.fullerton.edu 6/23/2021 17:53 6/23/2021 20:56
+3@csu.fullerton.edu 6/14/2021 18:48 6/14/2021 19:50
+4@csu.fullerton.edu 6/21/2021 17:56 6/21/2021 20:39
+3@csu.fullerton.edu 6/21/2021 19:44 6/21/2021 19:50
+
 
 Build
 
@@ -20,8 +22,12 @@ Run
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <cstring>
+#include <sys/types.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
+#include <unistd.h>
+
 using namespace std;
 
 //buffer size
@@ -72,7 +78,8 @@ int main(int argc, char *argv[])
     }
 
     //read file and write to the shared session
-    ifstream inputFile(argv[1]);
+    ifstream inputFile;
+    inputFile.open(argv[1]);
 
     //check file canbe opened
     if (!inputFile.is_open())
@@ -90,7 +97,7 @@ int main(int argc, char *argv[])
     }
 
     //attach to the pointer
-    shmp = shmat(shmid, NULL, 0);
+    shmp = (ShareSection*)shmat(shmid, NULL, 0);
     if (shmp == (void *)-1)
     {
         fprintf(stderr, "Shared memory attach");
@@ -101,25 +108,33 @@ int main(int argc, char *argv[])
     shmp->complete = 0;
 
     //count the number of lines
-    string line;
     while (getline(inputFile, line))
     {
-        cout << line << endl;
+        shmp->count += 1;
     }
 
-    //close file
+     //close file
     inputFile.close();
+
+    //open file again
+    inputFile.open(argv[1]);
 
     //read students from file and
     //write the shared session
     for (int i = 0; i < shmp->count; i++)
-    {
+    {        
         //for information for one student
         inputFile >> shmp->students[i].email;
         inputFile >> shmp->students[i].fromDate;
         inputFile >> shmp->students[i].fromTime;
         inputFile >> shmp->students[i].toDate;
         inputFile >> shmp->students[i].toTime;
+
+        //cout << shmp->students[i].email << endl;
+        //cout << shmp->students[i].fromDate << endl;
+        //cout << shmp->students[i].fromTime << endl;
+        //cout << shmp->students[i].toDate << endl;
+        //cout << shmp->students[i].toTime << endl;
     }
 
     shmp->complete = 1; //mark as completed
@@ -127,12 +142,23 @@ int main(int argc, char *argv[])
     //close file
     inputFile.close();
 
+    cout << "Wait for consumer" << endl;
+
+    //wait for client to read it
+    while (shmp->complete == 1){
+        cout << "Wait for consumer" << endl;
+        usleep(1000000);
+    }
+
     //detaches the shared memory segment
     if (shmdt(shmp) == -1)
     {
-        perror("shmdt");
+        fprintf(stderr, "Error shmdt");
         return 1;
     }
+
+    //remove memory
+    shmctl(shmid, IPC_RMID, NULL);
 
     return 0;
 }
