@@ -14,23 +14,26 @@ it gets the amount of minutes for the particular date and their total.
 In addition, each thread should be allowed to write their findings into the single text file 
 studentreport.txt in this format: email, date, the total number of minutes.
 
-The main threads, meanwhile, executes the threads''â€™'' join function.
+The main threads, meanwhile, executes the threads''’'' join function.
 
 After all threads complete their search, then the main thread prints 
 "the student with <email> attended a total of N of minutes during the entire semester, 
-and the following dates: date/minutes per class date.
+and the following dates: date/minutes per class date.”
 
 */
 
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <cstdlib>
 #include <cstring>
 #include <sys/ipc.h>
 #include <sys/shm.h>
+#include <sys/types.h>
 #include <ctime>
 #include <pthread.h>
 #include <semaphore.h>
+#include <unistd.h>
 
 using namespace std;
 
@@ -42,7 +45,7 @@ using namespace std;
 #define MAX_RECORDS 100
 
 //output file name
-#define OUTPUT_FILENAME = "studentreport.txt"
+#define OUTPUT_FILENAME "studentreport.txt"
 
 //mutext to proctect critical session (write file)
 sem_t mutex;
@@ -99,7 +102,7 @@ void* doConsumerWork(void* data){
     for  (int i = arg->fromPos; i < arg->toPos; i++){
 
         //find email
-        if (strcmp(arg->students[i].email), arg->email) == 0){
+        if (strcmp(arg->students[i].email, arg->email) == 0){
             
             //gets the amount of minutes for the particular date and their total
 
@@ -110,8 +113,11 @@ void* doConsumerWork(void* data){
             sscanf(arg->students[i].fromTime, "%d:%d", &hours1, &minutes1);
 
             int year2, month2, days2, hours2, minutes2;
-            sscanf(arg->students[i].fromDate, "%d/%d/%d", &year2, &days2, &month2);
-            sscanf(arg->students[i].fromTime, "%d:%d", &hours2, &minutes2);
+            sscanf(arg->students[i].toDate, "%d/%d/%d", &year2, &days2, &month2);
+            sscanf(arg->students[i].toTime, "%d:%d", &hours2, &minutes2);
+
+            //cout << year1 << month1 << days1 << hours1 << minutes1 << endl;
+            //cout << year2 << month2 << days2 << hours2 << minutes2 << endl;
 
             //number of minutes
             int numMinutes = 0;    
@@ -121,11 +127,13 @@ void* doConsumerWork(void* data){
                 minutes1++;
                 if (minutes1 == 60){
                     hours1 += 1;
+                    minutes1 = 0;
                 }
+                
             }
 
             //write statistics
-            arg->minutes[arg->index] += minutes1;
+            arg->minutes[arg->index] += numMinutes;
 
             //write to file
             //protect shared file: do later
@@ -174,6 +182,8 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    //cout << "numThreads" << numThreads << endl;
+
     //create array of thread handles
     pthread_t* threads = new pthread_t[numThreads]; 
 
@@ -187,7 +197,7 @@ int main(int argc, char *argv[])
     }
 
     //attach shared memory
-    shmp = shmat(shmid, NULL, 0);
+    shmp = (ShareSection*)shmat(shmid, NULL, 0);
     if (shmp == (void *)-1)
     {
         fprintf(stderr, "Shared memory attach");
@@ -196,7 +206,8 @@ int main(int argc, char *argv[])
 
     //wait for data
     while (shmp->complete != 1) {
-        sleep(1);
+        cout << "Wait for producer" << endl;
+        usleep(1000000);
     }
 
     //create dynamic array of objects
@@ -213,13 +224,16 @@ int main(int argc, char *argv[])
     }
 
     //search range for each thread
-    int range = shmp->count / numStudents;
+    int range = shmp->count / numThreads;
+
+    //init semaphore
+    sem_init(&mutex, 0, 1);
 
     //arguments
     ThreadArg* threadArgs = new ThreadArg[numThreads];
 
     //statistics
-    threadArgs[i].minutes = new int[numThreads];
+    int* minutes = new int[numThreads];
 
     for (int i = 0; i < numThreads; i++){
       strcpy(threadArgs[i].email, argv[1]);//copy email
@@ -228,6 +242,7 @@ int main(int argc, char *argv[])
       threadArgs[i].fromPos = i * range;
       threadArgs[i].toPos = (i + 1) * range;
 
+      threadArgs[i].minutes = minutes;
       threadArgs[i].minutes[i] = 0;
       threadArgs[i].index = i;
 
@@ -235,6 +250,18 @@ int main(int argc, char *argv[])
         threadArgs[i].toPos = shmp->count;
       }
     }
+
+    //create and clear file
+    ofstream outfile (OUTPUT_FILENAME);
+    if (outfile.is_open())
+    {
+        //close file
+        outfile.close();
+    }
+
+    //cout << "shmp->complete: " << shmp->complete << endl;
+    //cout << "shmp->count: " << shmp->count << endl;
+    //cout << "range: " << range << endl;   
 
     //create and run threads
     for (int i = 0; i < numThreads; i++){
@@ -252,8 +279,8 @@ int main(int argc, char *argv[])
         totalMinutes += threadArgs[i].minutes[i];
     }
 
-    printf("the student with %s attended a total of %d of minutes during the entire semester,",
-        args[1], totalMinutes);
+    printf("the student with %s attended a total of %d of minutes during the entire semester,\n",
+        argv[1], totalMinutes);
 
     //print details
     //read file
@@ -267,16 +294,22 @@ int main(int argc, char *argv[])
     }
 
     //count the number of lines
+    string line;
     while (getline(inputFile, line))
     {
-        shmp->count += 1;
+        cout << line << endl;
     }
 
-    
+    //close file
+    inputFile.close();
+
+    //done reading shared memory
+    shmp->complete = 0;
 
     //free resources
     delete [] students;
     delete [] threads;
+    delete [] minutes;
 
     return 0;
 }
