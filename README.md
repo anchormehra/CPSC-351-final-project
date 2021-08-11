@@ -1,4 +1,5 @@
 # 351
+This is California State University Fullerton's Operating System Class CPSC351 final project.
 1. How to Build code
 
 Open terminal and enter
